@@ -16,7 +16,50 @@ from rich import print
 
 mySecrets = Secrets()
 
+
+@function_tool('weather_tool')
+@cl.step(type="Get Weather Tool")
+async def get_weather(location: str) -> str:
+    """
+    Retrieves current weather information for a specified location.
+
+    This function makes an asynchronous API call to fetch real-time weather data
+    including temperature, weather conditions, wind speed, humidity, and UV index
+    for the given location.
+
+    Args:
+        location (str): The location for which to fetch weather data. Can be a city name,
+                       coordinates, or other location identifier supported by the weather API.
+
+    Returns:
+        str: A formatted string containing comprehensive weather information including:
+             - Location details (name, region, country)
+             - Current date and time
+             - Temperature in Celsius and "feels like" temperature
+             - Weather condition description
+             - Wind speed (km/h) and direction
+             - Humidity percentage
+             - UV index
+
+             If the API request fails, returns an error message indicating the failure.
+
+    Raises:
+        This function handles HTTP errors internally and returns error messages as strings
+        rather than raising exceptions.
+
+    Example:
+        >>> weather = await get_current_weather("London")
+        >>> print(weather)
+        Current weather in London, England, United Kingdom as of 2023-10-15 14:30 is 18°C (Partly cloudy), feels like 17°C, wind 15 km/h SW, humidity 65% and UV index is 4.
+    """
+    result = requests.get(f"{mySecrets.weather_api_url}/current.json?key={mySecrets.weather_api_key}&q={location}")
+    if(result.status_code != 200):
+        return f"Failed to fetch weather data for {location}. Please try again later."
+    data = result.json()
+    return f"Current weather in {data['location']['name']}, {data['location']['region']}, {data['location']['country']} as of {data['current']['last_updated']} is {data['current']['temp_c']}°C ({data['current']['condition']['text']}), feels like {data['current']['feelslike_c']}°C, wind {data['current']['wind_kph']} km/h {data['current']['wind_dir']}, humidity {data['current']['humidity']}% and UV index is {data['current']['uv']}."
+
 @function_tool('student_info_tool')
+@cl.step(type="Get Student Info Tool")
 async def get_student_info(student_id: int):
     """Fetch student information by ID."""
     students = {
@@ -66,12 +109,23 @@ async def start():
         base_url=mySecrets.gemini_api_url, api_key=mySecrets.gemini_api_key
     )
     set_tracing_disabled(True)
+    essay_agent = Agent(
+        name="Essay Writer",
+        instructions="You are an expert essay writer. Write a detailed 1000 word essay on the given topic.",
+        model=OpenAIChatCompletionsModel(
+            openai_client=external_client, model=mySecrets.gemini_api_model
+        ),
+    )
     agent = Agent(
         name="Assistant",
         instructions="You are a friendly and informative assistant.",
         model=OpenAIChatCompletionsModel(
             openai_client=external_client, model=mySecrets.gemini_api_model
         ),
+        tools=[get_weather,get_student_info,essay_agent.as_tool(
+            tool_name="essay_writer_tool",
+            tool_description="Write a detailed 1000 word essay on the given topic."
+            ),]
     )
     cl.user_session.set("agent", agent)
     cl.user_session.set("chat_history", [])
