@@ -1,0 +1,10 @@
+[
+    {
+        "role": "user",
+        "content": "Retrieve information about a student using their ID."
+    },
+    {
+        "role": "assistant",
+        "content": "Please provide me with the student's ID.  I need that information to retrieve their details.  I cannot access any personal data without it.  Once you provide the ID, please also let me know what information you'd like to retrieve (e.g., name, address, grades, courses enrolled in).  Keep in mind that I will only be able to provide information that is ethically and legally permissible to share.\n"
+    }
+]
