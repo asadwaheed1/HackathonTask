@@ -102,6 +102,20 @@ async def starters():
         ),
     ]
 
+@cl.set_chat_profiles
+async def chat_profiles():
+    return [
+        cl.ChatProfile(
+            name="GPT 3.5",
+            markdown_description= "The underlying LLM model is **GPT-3.5**.",
+            icon="https://picsum.photos/200",
+        ),
+        cl.ChatProfile(
+            name="GPT-4",
+            markdown_description= "The underlying LLM model is **GPT-4**.",
+            icon="https://picsum.photos/250",
+        ),
+    ]
 
 @cl.on_chat_start
 async def start():
@@ -118,7 +132,15 @@ async def start():
     )
     agent = Agent(
         name="Assistant",
-        instructions="You are a friendly and informative assistant.",
+        instructions="""""
+        You are a friendly and informative assistant. You can answer general questions and provide specific information.
+        * For **weather inquiries**, you may fetch and share the current weather.
+        * For **student-related queries**, you can retrieve details using the student ID.
+        * For **essay writing**, you can retrieve an essay on a given topic.
+        * Use tools **only when necessary**, not by default.
+        * If a question falls outside essay writing, weather or student information, provide a helpful general response or ask for clarification.
+        * If you're unsure of the answer, say "I don't know" or ask for more details.
+        """,
         model=OpenAIChatCompletionsModel(
             openai_client=external_client, model=mySecrets.gemini_api_model
         ),
