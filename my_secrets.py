@@ -25,6 +25,13 @@ if not gemini_api_model:
     )
     exit(1)
 
+gemini_api_model_2 = os.getenv("GEMINI_API_MODEL_2")
+if not gemini_api_model_2:
+    print(
+        "[red]Error:[/red] [green]GEMINI_API_MODEL_2[/green] is not set in the environment variables."
+    )
+    exit(1)
+
 weather_api_url = os.getenv("WEATHER_API_URL")
 if not weather_api_url:
     print(
@@ -44,5 +51,6 @@ class Secrets:
         self.gemini_api_key = gemini_api_key
         self.gemini_api_url = gemini_api_url
         self.gemini_api_model = gemini_api_model
+        self.gemini_api_model_2 = gemini_api_model_2
         self.weather_api_key = weather_api_key
         self.weather_api_url = weather_api_url

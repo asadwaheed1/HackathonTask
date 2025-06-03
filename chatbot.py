@@ -13,11 +13,12 @@ import json
 from openai.types.responses import ResponseTextDeltaEvent
 import requests
 from rich import print
+from chainlit.input_widget import Select, Switch
 
 mySecrets = Secrets()
 
 
-@function_tool('weather_tool')
+@function_tool("weather_tool")
 @cl.step(type="Get Weather Tool")
 async def get_weather(location: str) -> str:
     """
@@ -52,13 +53,16 @@ async def get_weather(location: str) -> str:
         >>> print(weather)
         Current weather in London, England, United Kingdom as of 2023-10-15 14:30 is 18°C (Partly cloudy), feels like 17°C, wind 15 km/h SW, humidity 65% and UV index is 4.
     """
-    result = requests.get(f"{mySecrets.weather_api_url}/current.json?key={mySecrets.weather_api_key}&q={location}")
-    if(result.status_code != 200):
+    result = requests.get(
+        f"{mySecrets.weather_api_url}/current.json?key={mySecrets.weather_api_key}&q={location}"
+    )
+    if result.status_code != 200:
         return f"Failed to fetch weather data for {location}. Please try again later."
     data = result.json()
     return f"Current weather in {data['location']['name']}, {data['location']['region']}, {data['location']['country']} as of {data['current']['last_updated']} is {data['current']['temp_c']}°C ({data['current']['condition']['text']}), feels like {data['current']['feelslike_c']}°C, wind {data['current']['wind_kph']} km/h {data['current']['wind_dir']}, humidity {data['current']['humidity']}% and UV index is {data['current']['uv']}."
 
-@function_tool('student_info_tool')
+
+@function_tool("student_info_tool")
 @cl.step(type="Get Student Info Tool")
 async def get_student_info(student_id: int):
     """Fetch student information by ID."""
@@ -76,14 +80,13 @@ async def get_student_info(student_id: int):
         return f"No student found with ID {student_id}."
 
 
-
 @cl.set_starters
 async def starters():
     return [
         cl.Starter(
-            label = "Get Current Weather",
-            message = "Fetch the current weather for a specified location.",
-            icon= "/public/weather.svg",
+            label="Get Current Weather",
+            message="Fetch the current weather for a specified location.",
+            icon="/public/weather.svg",
         ),
         cl.Starter(
             label="Get Student Info",
@@ -102,34 +105,72 @@ async def starters():
         ),
     ]
 
+
 @cl.set_chat_profiles
 async def chat_profiles():
     return [
         cl.ChatProfile(
-            name="GPT 3.5",
-            markdown_description= "The underlying LLM model is **GPT-3.5**.",
+            name="GPT 2.0 Flash",
+            markdown_description="The underlying LLM model is **GPT-2.0 Flash**.",
             icon="https://picsum.photos/200",
         ),
         cl.ChatProfile(
-            name="GPT-4",
-            markdown_description= "The underlying LLM model is **GPT-4**.",
+            name="GPT-1.5",
+            markdown_description="The underlying LLM model is **GPT-1.5**.",
             icon="https://picsum.photos/250",
         ),
     ]
 
+
 @cl.on_chat_start
 async def start():
+    chat_profile = cl.user_session.get("chat_profile")
+    print(f"Chat profile: {chat_profile}")
+    profileModel = mySecrets.gemini_api_model
+    if chat_profile is "GPT 2.0 Flash":
+        profileModel = mySecrets.gemini_api_model_2
+    else:
+        profileModel = mySecrets.gemini_api_model
+    settings = await cl.ChatSettings(
+        [
+            Select(
+                id="mode",
+                label="Chat Mode",
+                values=["Casual", "Technical"],
+                initial_index=1,
+            ),
+            Switch(id="enable_weather", label="Enable Weather Tool", initial=True),
+            Switch(id="enable_student_info", label="Enable Student Info Tool", initial=True),
+            Switch(id="enable_essay", label="Enable Essay Tool", initial=True),
+        ]
+    ).send()
     external_client = AsyncOpenAI(
         base_url=mySecrets.gemini_api_url, api_key=mySecrets.gemini_api_key
     )
-    set_tracing_disabled(True)
+    tools = []
     essay_agent = Agent(
         name="Essay Writer",
         instructions="You are an expert essay writer. Write a detailed 1000 word essay on the given topic.",
         model=OpenAIChatCompletionsModel(
-            openai_client=external_client, model=mySecrets.gemini_api_model
+            openai_client=external_client, model=profileModel
         ),
     )
+    if settings.get("enable_weather"):
+        tools.append(get_weather)
+
+    if settings.get("enable_student_info"):
+        tools.append(get_student_info)
+
+    if settings.get("enable_essay"):
+        tools.append(
+            essay_agent.as_tool(
+                tool_name="essay_writer_tool",
+                tool_description="Write a detailed 1000-word essay on the given topic.",
+            )
+        )
+   
+    set_tracing_disabled(True)
+   
     agent = Agent(
         name="Assistant",
         instructions="""""
@@ -144,10 +185,14 @@ async def start():
         model=OpenAIChatCompletionsModel(
             openai_client=external_client, model=mySecrets.gemini_api_model
         ),
-        tools=[get_weather,get_student_info,essay_agent.as_tool(
-            tool_name="essay_writer_tool",
-            tool_description="Write a detailed 1000 word essay on the given topic."
-            ),]
+        tools=[
+            get_weather,
+            get_student_info,
+            essay_agent.as_tool(
+                tool_name="essay_writer_tool",
+                tool_description="Write a detailed 1000 word essay on the given topic.",
+            ),
+        ],
     )
     cl.user_session.set("agent", agent)
     cl.user_session.set("chat_history", [])
@@ -183,9 +228,7 @@ async def main(msg: cl.Message):
         cl.user_session.set("chat_history", chat_history)
         await response_message.update()
     except Exception as e:
-        response_message.content = (
-            f"An error occurred: {e}. Please try again later."
-        )
+        response_message.content = f"An error occurred: {e}. Please try again later."
         await response_message.update()
 
 
