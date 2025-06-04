@@ -309,7 +309,7 @@ def build_agent(settings: dict) -> Agent:
         name="Assistant",
         instructions=instructions,
         model=OpenAIChatCompletionsModel(
-            openai_client=external_client, model=mySecrets.gemini_api_model
+            openai_client=external_client, model=profileModel
         ),
         tools=tools,
     )
