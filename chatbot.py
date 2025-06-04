@@ -14,7 +14,7 @@ from openai.types.responses import ResponseTextDeltaEvent
 import requests
 from rich import print
 from chainlit.input_widget import Select, Switch
-
+from user_settings import UserSettings
 mySecrets = Secrets()
 
 
@@ -80,30 +80,52 @@ async def get_student_info(student_id: int):
         return f"No student found with ID {student_id}."
 
 
+import chainlit as cl
+from chainlit.context import get_context, ChainlitContextException
+
 @cl.set_starters
 async def starters():
-    return [
-        cl.Starter(
-            label="Get Current Weather",
-            message="Fetch the current weather for a specified location.",
-            icon="/public/weather.svg",
-        ),
-        cl.Starter(
-            label="Get Student Info",
-            message="Retrieve information about a student using their ID.",
-            icon="/public/student.svg",
-        ),
+    """  user_key = "demo_user_123"
+    user_settings = UserSettings(user_key)
+    settings = user_settings.settings """
+
+    starters_list = []
+
+    starters_list.append(
+            cl.Starter(
+                label="Get Current Weather",
+                message="Fetch the current weather for a specified location.",
+                icon="/public/weather.svg",
+            )
+        )
+
+    starters_list.append(
+            cl.Starter(
+                label="Get Student Info",
+                message="Retrieve information about a student using their ID.",
+                icon="/public/student.svg",
+            )
+        )
+
+    starters_list.append(
+            cl.Starter(
+                label="Write an Essay",
+                message="Generate a 1000-word essay on a given topic.",
+                icon="/public/article.svg",
+            )
+        )
+
+    starters_list.append(
         cl.Starter(
             label="Explore General Questions",
             message="Find answers to the given questions.",
             icon="/public/question.svg",
-        ),
-        cl.Starter(
-            label="Write an Essay",
-            message="Generate an 1000 words essay on a given topic.",
-            icon="/public/article.svg",
-        ),
-    ]
+        )
+    )
+
+    return starters_list
+
+
 
 
 @cl.set_chat_profiles
@@ -122,80 +144,71 @@ async def chat_profiles():
     ]
 
 
-@cl.on_chat_start
-async def start():
-    chat_profile = cl.user_session.get("chat_profile")
-    print(f"Chat profile: {chat_profile}")
-    profileModel = mySecrets.gemini_api_model
-    if chat_profile is "GPT 2.0 Flash":
-        profileModel = mySecrets.gemini_api_model_2
-    else:
-        profileModel = mySecrets.gemini_api_model
+@cl.on_settings_update
+async def on_settings_update(settings: dict):
+    cl.user_session.set("chat_settings", settings) 
     settings = await cl.ChatSettings(
         [
             Select(
                 id="mode",
                 label="Chat Mode",
                 values=["Casual", "Technical"],
-                initial_index=1,
+                initial_value=settings.get("mode", "Technical"),
             ),
-            Switch(id="enable_weather", label="Enable Weather Tool", initial=True),
-            Switch(id="enable_student_info", label="Enable Student Info Tool", initial=True),
-            Switch(id="enable_essay", label="Enable Essay Tool", initial=True),
+            Switch(id="enable_weather", label="Enable Weather Tool", initial=settings.get("enable_weather", True)),
+            Switch(
+                id="enable_student_info", label="Enable Student Info Tool", initial=settings.get("enable_student_info", True)
+            ),
+            Switch(id="enable_essay", label="Enable Essay Tool", initial=settings.get("enable_essay", True)),
         ]
     ).send()
-    external_client = AsyncOpenAI(
-        base_url=mySecrets.gemini_api_url, api_key=mySecrets.gemini_api_key
-    )
-    tools = []
-    essay_agent = Agent(
-        name="Essay Writer",
-        instructions="You are an expert essay writer. Write a detailed 1000 word essay on the given topic.",
-        model=OpenAIChatCompletionsModel(
-            openai_client=external_client, model=profileModel
-        ),
-    )
-    if settings.get("enable_weather"):
-        tools.append(get_weather)
+    user_key = "demo_user_123"
+    user_settings = UserSettings(user_key)
+    user_settings.settings = settings
+    user_settings.save_settings()
+    await initialize_agent(settings)
 
-    if settings.get("enable_student_info"):
-        tools.append(get_student_info)
 
-    if settings.get("enable_essay"):
-        tools.append(
-            essay_agent.as_tool(
-                tool_name="essay_writer_tool",
-                tool_description="Write a detailed 1000-word essay on the given topic.",
-            )
-        )
-   
-    set_tracing_disabled(True)
-   
-    agent = Agent(
-        name="Assistant",
-        instructions="""""
-        You are a friendly and informative assistant. You can answer general questions and provide specific information.
-        * For **weather inquiries**, you may fetch and share the current weather.
-        * For **student-related queries**, you can retrieve details using the student ID.
-        * For **essay writing**, you can retrieve an essay on a given topic.
-        * Use tools **only when necessary**, not by default.
-        * If a question falls outside essay writing, weather or student information, provide a helpful general response or ask for clarification.
-        * If you're unsure of the answer, say "I don't know" or ask for more details.
-        """,
-        model=OpenAIChatCompletionsModel(
-            openai_client=external_client, model=mySecrets.gemini_api_model
-        ),
-        tools=[
-            get_weather,
-            get_student_info,
-            essay_agent.as_tool(
-                tool_name="essay_writer_tool",
-                tool_description="Write a detailed 1000 word essay on the given topic.",
+@cl.on_chat_start
+async def start():
+    user_key = "demo_user_123"
+    print(f"Chat started for user: {user_key}")
+    user_settings = UserSettings(user_key)
+    saved_settings = user_settings.settings
+    settings = await cl.ChatSettings(
+        [
+            Select(
+                id="mode",
+                label="Chat Mode",
+                values=["Casual", "Technical"],
+                initial_value=saved_settings.get("mode", "Technical"),
             ),
-        ],
-    )
-    cl.user_session.set("agent", agent)
+            Switch(
+                id="enable_weather",
+                label="Enable Weather Tool",
+                initial=saved_settings.get("enable_weather", True),
+            ),
+            Switch(
+                id="enable_student_info",
+                label="Enable Student Info Tool",
+                initial=saved_settings.get("enable_student_info", True),
+            ),
+            Switch(
+                id="enable_essay",
+                label="Enable Essay Tool",
+                initial=saved_settings.get("enable_essay", True),
+            ),
+        ]
+    ).send()
+    
+    
+    set_tracing_disabled(True)
+
+   
+    cl.user_session.set("chat_settings", settings)
     cl.user_session.set("chat_history", [])
+    cl.user_session.set("user_settings", user_settings)  
+    await initialize_agent(settings)
 
 
 @cl.on_message
@@ -237,3 +250,70 @@ def end():
     chat_history = cl.user_session.get("chat_history") or []
     with open("chat_history.json", "w") as f:
         json.dump(chat_history, f, indent=4)
+
+
+def build_agent(settings: dict) -> Agent:
+    tools = []
+    chat_profile = cl.user_session.get("chat_profile")
+    print(f"Chat profile: {chat_profile}")
+    profileModel = mySecrets.gemini_api_model
+    if chat_profile == "GPT 2.0 Flash":
+        profileModel = mySecrets.gemini_api_model_2
+    else:
+        profileModel = mySecrets.gemini_api_model
+    external_client = AsyncOpenAI(
+        base_url=mySecrets.gemini_api_url, api_key=mySecrets.gemini_api_key
+    )
+    essay_agent = Agent(
+        name="Essay Writer",
+        instructions="You are an expert essay writer. Write a detailed 1000 word essay on the given topic.",
+        model=OpenAIChatCompletionsModel(
+            openai_client=external_client, model=profileModel
+        ),
+    )
+
+    if settings.get("enable_weather"):
+        tools.append(get_weather)
+
+    if settings.get("enable_student_info"):
+        tools.append(get_student_info)
+
+    if settings.get("enable_essay"):
+        tools.append(
+            essay_agent.as_tool(
+                tool_name="essay_writer_tool",
+                tool_description="Write a detailed 1000-word essay on the given topic.",
+            )
+        )
+    instructions = """""
+        You are a friendly and informative assistant. You can answer general questions and provide specific information.
+        * For **weather inquiries**, you may fetch and share the current weather.
+        * For **student-related queries**, you can retrieve details using the student ID.
+        * For **essay writing**, you can retrieve an essay on a given topic.
+        * Use tools **only when necessary**, not by default.
+        * If a question falls outside essay writing, weather or student information, provide a helpful general response or ask for clarification.
+        * If you're unsure of the answer, say "I don't know" or ask for more details.
+        """
+    if settings.get("mode") == "Casual":
+        instructions = """""
+        You are a friendly and informative assistant. You answer all questions in casual tone. You can answer general questions and provide specific information.
+        * For **weather inquiries**, you may fetch and share the current weather.
+        * For **student-related queries**, you can retrieve details using the student ID.
+        * For **essay writing**, you can retrieve an essay on a given topic.
+        * Use tools **only when necessary**, not by default.
+        * If a question falls outside essay writing, weather or student information, provide a helpful general response or ask for clarification.
+        * If you're unsure of the answer, say "I don't know" or ask for more details.
+        """
+
+    return Agent(
+        name="Assistant",
+        instructions=instructions,
+        model=OpenAIChatCompletionsModel(
+            openai_client=external_client, model=mySecrets.gemini_api_model
+        ),
+        tools=tools,
+    )
+    
+async def initialize_agent(settings: dict):
+    agent = build_agent(settings)
+    cl.user_session.set("agent", agent)
