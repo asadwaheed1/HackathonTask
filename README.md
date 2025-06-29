@@ -1,4 +1,4 @@
-### Build an OpenAI Agent SDK-Based Chatbot with Chainlit Assignment PIAIC 255779
+### Build an OpenAI Agent SDK-Based Chatbot with Chainlit Hackathon Task
 
 **Assalamualikum! To run the project you must have python installed and uv installed.**
 
