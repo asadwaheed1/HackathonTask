@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import chainlit as cl
 from agents import (
     Agent,
@@ -6,6 +7,8 @@ from agents import (
     OpenAIChatCompletionsModel,
     set_tracing_disabled,
     function_tool,
+    RunContextWrapper,
+    handoff,
 )
 from my_secrets import Secrets
 from typing import cast
@@ -15,6 +18,7 @@ import requests
 from rich import print
 from chainlit.input_widget import Select, Switch
 from user_settings import UserSettings
+
 mySecrets = Secrets()
 
 
@@ -62,6 +66,20 @@ async def get_weather(location: str) -> str:
     return f"Current weather in {data['location']['name']}, {data['location']['region']}, {data['location']['country']} as of {data['current']['last_updated']} is {data['current']['temp_c']}°C ({data['current']['condition']['text']}), feels like {data['current']['feelslike_c']}°C, wind {data['current']['wind_kph']} km/h {data['current']['wind_dir']}, humidity {data['current']['humidity']}% and UV index is {data['current']['uv']}."
 
 
+@dataclass
+class Developer:
+    name: str
+    city: str
+    country: str
+
+
+@function_tool
+@cl.step(type="Get Author Details Tool")
+def get_author_details(wrapper: RunContextWrapper[Developer]):
+    """Returns Developer details aka Author details."""
+    return f"The developer is {wrapper.context.name}, based in {wrapper.context.city}, {wrapper.context.country}."
+
+
 @function_tool("student_info_tool")
 @cl.step(type="Get Student Info Tool")
 async def get_student_info(student_id: int):
@@ -80,40 +98,37 @@ async def get_student_info(student_id: int):
         return f"No student found with ID {student_id}."
 
 
-import chainlit as cl
-from chainlit.context import get_context, ChainlitContextException
-
 @cl.set_starters
 async def starters():
-    """  user_key = "demo_user_123"
+    """user_key = "demo_user_123"
     user_settings = UserSettings(user_key)
-    settings = user_settings.settings """
+    settings = user_settings.settings"""
 
     starters_list = []
 
     starters_list.append(
-            cl.Starter(
-                label="Get Current Weather",
-                message="Fetch the current weather for a specified location.",
-                icon="/public/weather.svg",
-            )
+        cl.Starter(
+            label="Get Current Weather",
+            message="Fetch the current weather for a specified location.",
+            icon="/public/weather.svg",
         )
+    )
 
     starters_list.append(
-            cl.Starter(
-                label="Get Student Info",
-                message="Retrieve information about a student using their ID.",
-                icon="/public/student.svg",
-            )
+        cl.Starter(
+            label="Get Student Info",
+            message="Retrieve information about a student using their ID.",
+            icon="/public/student.svg",
         )
+    )
 
     starters_list.append(
-            cl.Starter(
-                label="Write an Essay",
-                message="Generate a 1000-word essay on a given topic.",
-                icon="/public/article.svg",
-            )
+        cl.Starter(
+            label="Write an Essay",
+            message="Generate a 1000-word essay on a given topic.",
+            icon="/public/article.svg",
         )
+    )
 
     starters_list.append(
         cl.Starter(
@@ -126,8 +141,6 @@ async def starters():
     return starters_list
 
 
-
-
 @cl.set_chat_profiles
 async def chat_profiles():
     return [
@@ -137,8 +150,8 @@ async def chat_profiles():
             icon="https://picsum.photos/200",
         ),
         cl.ChatProfile(
-            name="GPT-1.5",
-            markdown_description="The underlying LLM model is **GPT-1.5**.",
+            name="GPT-2.5 Flash",
+            markdown_description="The underlying LLM model is **GPT-2.5 Flash**.",
             icon="https://picsum.photos/250",
         ),
     ]
@@ -146,7 +159,7 @@ async def chat_profiles():
 
 @cl.on_settings_update
 async def on_settings_update(settings: dict):
-    cl.user_session.set("chat_settings", settings) 
+    cl.user_session.set("chat_settings", settings)
     settings = await cl.ChatSettings(
         [
             Select(
@@ -155,11 +168,21 @@ async def on_settings_update(settings: dict):
                 values=["Casual", "Technical"],
                 initial_value=settings.get("mode", "Technical"),
             ),
-            Switch(id="enable_weather", label="Enable Weather Tool", initial=settings.get("enable_weather", True)),
             Switch(
-                id="enable_student_info", label="Enable Student Info Tool", initial=settings.get("enable_student_info", True)
+                id="enable_weather",
+                label="Enable Weather Tool",
+                initial=settings.get("enable_weather", True),
             ),
-            Switch(id="enable_essay", label="Enable Essay Tool", initial=settings.get("enable_essay", True)),
+            Switch(
+                id="enable_student_info",
+                label="Enable Student Info Tool",
+                initial=settings.get("enable_student_info", True),
+            ),
+            Switch(
+                id="enable_essay",
+                label="Enable Essay Tool",
+                initial=settings.get("enable_essay", True),
+            ),
         ]
     ).send()
     user_key = "demo_user_123"
@@ -200,14 +223,12 @@ async def start():
             ),
         ]
     ).send()
-    
-    
+
     set_tracing_disabled(True)
 
-   
     cl.user_session.set("chat_settings", settings)
     cl.user_session.set("chat_history", [])
-    cl.user_session.set("user_settings", user_settings)  
+    cl.user_session.set("user_settings", user_settings)
     await initialize_agent(settings)
 
 
@@ -219,10 +240,10 @@ async def main(msg: cl.Message):
     agent = cast(Agent, cl.user_session.get("agent"))
     chat_history = cl.user_session.get("chat_history") or []
     chat_history.append({"role": "user", "content": msg.content})
+    developer = Developer(city="Lahore", country="Pakistan", name="Asad Waheed")
     try:
         result = Runner.run_streamed(
-            starting_agent=agent,
-            input=chat_history,
+            starting_agent=agent, input=chat_history, context=developer
         )
         response_message = cl.Message(content="")
         first_response = True
@@ -285,11 +306,14 @@ def build_agent(settings: dict) -> Agent:
                 tool_description="Write a detailed 1000-word essay on the given topic.",
             )
         )
+    tools.append(get_author_details)
     instructions = """""
         You are a friendly and informative assistant. You can answer general questions and provide specific information.
         * For **weather inquiries**, you may fetch and share the current weather.
         * For **student-related queries**, you can retrieve details using the student ID.
         * For **essay writing**, you can retrieve an essay on a given topic.
+        * For **Developer details**, you can provide developer details.
+        * You are also a triage agent who can handoff to billing and refund agents.
         * Use tools **only when necessary**, not by default.
         * If a question falls outside essay writing, weather or student information, provide a helpful general response or ask for clarification.
         * If you're unsure of the answer, say "I don't know" or ask for more details.
@@ -300,20 +324,51 @@ def build_agent(settings: dict) -> Agent:
         * For **weather inquiries**, you may fetch and share the current weather.
         * For **student-related queries**, you can retrieve details using the student ID.
         * For **essay writing**, you can retrieve an essay on a given topic.
+        * For **Developer details**, you can provide developer details.
+        * You are also a triage agent who can handoff to billing and refund agents.
         * Use tools **only when necessary**, not by default.
         * If a question falls outside essay writing, weather or student information, provide a helpful general response or ask for clarification.
         * If you're unsure of the answer, say "I don't know" or ask for more details.
         """
+    """authorAgent: Agent = Agent[Developer](
+        name="Assistant",
+        tools=[get_author_details],
+        instructions="If one ask for developer details use the respective tool.",
+        model=profileModel,
+    )"""
 
-    return Agent(
+    def on_handoff(agent: Agent, ctx: RunContextWrapper[None]):
+        agent_name = agent.name
+        print(f"Handing off to {agent_name}...")
+        # Send a more visible message in the chat
+        cl.Message(
+            content=f"🔄 **Handing off to {agent_name}...**\n\nI'm transferring your request to our {agent_name.lower()} who will be able to better assist you.",
+            author="System",
+        ).send()
+
+    billing_agent = Agent(
+        name="Billing Agent", instructions="You are a billing agent", model=profileModel
+    )
+    refund_agent = Agent(
+        name="Refund Agent", instructions="You are a refund agent", model=profileModel
+    )
+
+    return Agent[Developer](
         name="Assistant",
         instructions=instructions,
         model=OpenAIChatCompletionsModel(
             openai_client=external_client, model=profileModel
         ),
         tools=tools,
+        handoffs=[
+            handoff(
+                billing_agent, on_handoff=lambda ctx: on_handoff(billing_agent, ctx)
+            ),
+            handoff(refund_agent, on_handoff=lambda ctx: on_handoff(refund_agent, ctx)),
+        ],
     )
-    
+
+
 async def initialize_agent(settings: dict):
     agent = build_agent(settings)
     cl.user_session.set("agent", agent)

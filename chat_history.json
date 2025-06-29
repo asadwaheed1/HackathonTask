@@ -1,18 +1,1 @@
-[
-    {
-        "role": "user",
-        "content": "Fetch the current weather for a specified location."
-    },
-    {
-        "role": "assistant",
-        "content": "Sure!  But first, I need to know the location.  What city and state (or country) are you interested in?\n"
-    },
-    {
-        "role": "user",
-        "content": "Lahore"
-    },
-    {
-        "role": "assistant",
-        "content": "OK. According to the weather information I have, the current weather in Lahore, Pakistan is 36.1\u00b0C and partly cloudy.  It feels like 34.5\u00b0C. The wind is blowing from the north-northwest at 6.1 km/h, and the humidity is 35%. The UV index is 2.6.\n"
-    }
-]
+[]

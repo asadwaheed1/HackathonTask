@@ -46,6 +46,7 @@ if not weather_api_key:
     )
     exit(1)
 
+
 class Secrets:
     def __init__(self):
         self.gemini_api_key = gemini_api_key
