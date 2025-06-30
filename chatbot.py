@@ -3,10 +3,15 @@ from dataclasses import dataclass
 import chainlit as cl
 from agents import (
     Agent,
+    GuardrailFunctionOutput,
+    InputGuardrailTripwireTriggered,
     Runner,
     AsyncOpenAI,
     OpenAIChatCompletionsModel,
+    input_guardrail,
     set_tracing_disabled,
+    set_default_openai_api,
+    set_default_openai_client,
     function_tool,
     RunContextWrapper,
     handoff,
@@ -19,10 +24,16 @@ import requests
 from rich import print
 from chainlit.input_widget import Select, Switch
 from user_settings import UserSettings
-from contextlib import asynccontextmanager
+from pydantic import BaseModel
 
 mySecrets = Secrets()
+external_client = AsyncOpenAI(
+    base_url=mySecrets.gemini_api_url, api_key=mySecrets.gemini_api_key
+)
 
+set_default_openai_client(external_client)
+set_default_openai_api("chat_completions")
+set_tracing_disabled(True)
 
 @function_tool("weather_tool")
 @cl.step(type="Get Weather Tool")
@@ -226,7 +237,6 @@ async def start():
         ]
     ).send()
 
-    set_tracing_disabled(True)
 
     cl.user_session.set("chat_settings", settings)
     cl.user_session.set("chat_history", [])
@@ -279,6 +289,9 @@ async def main(msg: cl.Message):
         chat_history.append({"role": "assistant", "content": response_message.content})
         cl.user_session.set("chat_history", chat_history)
         await response_message.update()
+    except InputGuardrailTripwireTriggered as e:
+        await mythinking.remove()
+        await cl.Message(content="Please provide billing related queries only.").send()
     except asyncio.TimeoutError:
         await mythinking.remove()
         await cl.Message(content="⏱️ Timed out. Agent took too long to respond.").send()
@@ -293,7 +306,48 @@ def end():
     with open("chat_history.json", "w") as f:
         json.dump(chat_history, f, indent=4)
 
+# Define the output model for the guardrail agents
+class BillingOutput(BaseModel):
+    is_billing_related: bool
+    reasoning: str
+class RefundOutput(BaseModel):
+    is_refund_related: bool
+    reasoning: str
+    
+# Define the input guardrail function
+@input_guardrail
+async def billing_input_relevance_guardrail(
+    ctx: RunContextWrapper[None],
+    agent: Agent,
+    input: str | list,
+) -> GuardrailFunctionOutput:
+    result = await Runner.run(input_guardrail_agent, input, context=ctx.context)
+    final_output = result.final_output_as(BillingOutput)
+    return GuardrailFunctionOutput(
+        output_info=final_output,
+        tripwire_triggered=not final_output.is_billing_related,
+    )
 
+# Create the input guardrail agent to check if input is PIAIC-related
+input_guardrail_agent = Agent(
+    name="Billing_Relevance_Check",
+    instructions=(
+        '''You are a guardrail agent responsible for identifying if a user's input is related to billing topics. This includes, but isn't limited to, inquiries about invoices, payments, charges, subscriptions, pricing, or account statements. Please note: Inquiries specifically about refunds are handled by a separate agent and should not be flagged as billing-related by this agent.
+
+Your task is to thoroughly analyze the user's input and determine its relevance to any billing-related matter, excluding refunds.
+
+Return a structured output containing two key pieces of information:
+
+is_billing_related: A boolean value (true if related, false if not).
+
+reasoning: A clear and concise explanation for your decision, referencing specific keywords or phrases from the user's input that led to your conclusion.'''
+    ),
+    output_type=BillingOutput,
+    model=OpenAIChatCompletionsModel(
+            openai_client=external_client, model=mySecrets.gemini_api_model_2
+        ),
+)
+    
 def build_agent(settings: dict) -> Agent:
     tools = []
     chat_profile = cl.user_session.get("chat_profile")
@@ -303,9 +357,7 @@ def build_agent(settings: dict) -> Agent:
         profileModel = mySecrets.gemini_api_model_2
     else:
         profileModel = mySecrets.gemini_api_model
-    external_client = AsyncOpenAI(
-        base_url=mySecrets.gemini_api_url, api_key=mySecrets.gemini_api_key
-    )
+  
     essay_agent = Agent(
         name="Essay Writer",
         instructions="You are an expert essay writer. Write a detailed 1000 word essay on the given topic.",
@@ -372,23 +424,21 @@ def build_agent(settings: dict) -> Agent:
 
     billing_agent = Agent(
         name="Billing Agent",
-        instructions='''You are the billing agent. Answer all billing-related questions helpfully.
-        If you cannot answer a question, say "I don't know" or ask for more details.''',
-        model=OpenAIChatCompletionsModel(openai_client=external_client, model=profileModel),
+        instructions='''You are the billing agent. Answer all billing-related questions helpfully.''',
+        input_guardrails=[billing_input_relevance_guardrail],
+        model=profileModel,
     )
 
     refund_agent = Agent(
         name="Refund Agent",
         instructions="You are the refund agent. Help users with refund-related queries.",
-        model=OpenAIChatCompletionsModel(openai_client=external_client, model=profileModel),
+        model=profileModel,
     )
 
     return Agent[Developer](
         name="Assistant",
         instructions=instructions,
-        model=OpenAIChatCompletionsModel(
-            openai_client=external_client, model=profileModel
-        ),
+        model=profileModel,
         tools=tools,
         handoffs=[
             handoff(
