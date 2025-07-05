@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 import chainlit as cl
 from agents import (
@@ -247,6 +248,7 @@ async def main(msg: cl.Message):
         )
         response_message = cl.Message(content="")
         first_response = True
+        got_response = False  # Track if any response was received
 
         async for chunk in result.stream_events():
             if chunk.type == "raw_response_event" and isinstance(
@@ -257,7 +259,17 @@ async def main(msg: cl.Message):
                     await response_message.send()
                     first_response = False
                 await response_message.stream_token(chunk.data.delta)
-
+                got_response = True  # ✅ This was missing!
+        if not got_response:
+            await mythinking.remove()
+            await cl.Message(
+                content="🤖 Agent did not respond. Please try again or say 'back to support' to return."
+            ).send()
+            return
+        final_agent = result.last_agent
+        if final_agent != agent:
+            print(f"✅ Switched to agent: {final_agent.name}")
+            cl.user_session.set("agent", final_agent)
         chat_history.append({"role": "assistant", "content": response_message.content})
         cl.user_session.set("chat_history", chat_history)
         await response_message.update()
@@ -341,13 +353,21 @@ def build_agent(settings: dict) -> Agent:
         agent_name = agent.name
         print(f"Handing off to {agent_name}...")
         # Send a more visible message in the chat
-        cl.Message(
-            content=f"🔄 **Handing off to {agent_name}...**\n\nI'm transferring your request to our {agent_name.lower()} who will be able to better assist you.",
-            author="System",
-        ).send()
+        # ✅ Force future messages to use this agent
+        cl.user_session.set("agent", agent)
+        asyncio.create_task(
+            cl.Message(
+                content=f"🔄 **Handing off to {agent_name}...**\n\nI'm transferring your request to our {agent_name.lower()} who will be able to better assist you.",
+                author="System",
+            ).send()
+        )
 
     billing_agent = Agent(
-        name="Billing Agent", instructions="You are a billing agent", model=profileModel
+        name="Billing Agent",
+        instructions="You are a helpful billing assistant."
+        " Respond to billing-related questions such as invoices, charges, payment issues,"
+        " and billing history. If unsure, ask the user to clarify.",
+        model=profileModel,
     )
     refund_agent = Agent(
         name="Refund Agent", instructions="You are a refund agent", model=profileModel
